@@ -49,8 +49,10 @@ struct RouteListView: View {
     @State private var pendingGPXData: Data?
     @State private var routeToRename: Route?
     @State private var editingName = ""
+    @State private var debugInfo = ""
 
     var body: some View {
+        ZStack(alignment: .bottom) {
         NavigationStack {
             Group {
                 if viewModel.routes.isEmpty {
@@ -102,9 +104,13 @@ struct RouteListView: View {
                 Button("Сохранить") {
                     guard let route = routeToRename else { return }
                     let name = editingName
+                    debugInfo = "route='\(route.name)' | editing='\(editingName)' | captured='\(name)'"
                     routeToRename = nil
                     editingName = ""
-                    Task { await viewModel.rename(route, to: name) }
+                    Task {
+                        await viewModel.rename(route, to: name)
+                        debugInfo += " | routes=\(viewModel.routes.map(\.name))"
+                    }
                 }
                 Button("Отмена", role: .cancel) {
                     routeToRename = nil
@@ -112,6 +118,17 @@ struct RouteListView: View {
             }
             .task { await viewModel.loadRoutes() }
         }
+        if !debugInfo.isEmpty {
+            Text(debugInfo)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.white)
+                .padding(8)
+                .background(.black.opacity(0.85))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .padding()
+                .onTapGesture { debugInfo = "" }
+        }
+        } // ZStack
     }
 
     // MARK: - Subviews
