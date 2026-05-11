@@ -68,7 +68,7 @@ struct RouteListView: View {
                 defer { url.stopAccessingSecurityScopedResource() }
                 guard let data = try? Data(contentsOf: url) else { return }
                 pendingGPXData = data
-                editingName = ""
+                editingName = url.deletingPathExtension().lastPathComponent
                 isShowingNameAlert = true
             }
             .alert("Новый маршрут", isPresented: $isShowingNameAlert) {
