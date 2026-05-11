@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="RiverNavTests"
+     xmlns="http://www.topografix.com/GPX/1/1">
+  <trk>
+    <name>Test Track</name>
+    <trkseg>
+      <trkpt lat="55.7558" lon="37.6173"/>
+      <trkpt lat="55.7600" lon="37.6200"/>
+      <trkpt lat="55.7650" lon="37.6250"/>
+    </trkseg>
+  </trk>
+  <rte>
+    <name>Test Route</name>
+    <rtept lat="55.7700" lon="37.6300"/>
+    <rtept lat="55.7750" lon="37.6350"/>
+  </rte>
+</gpx>
