@@ -10,6 +10,8 @@ struct RouteView: View {
     @Environment(NavigationSessionManager.self) private var sessionManager
     @Environment(LocationService.self) private var locationService
 
+    @State private var isShowingFinishAlert = false
+
     var body: some View {
         ZStack(alignment: .bottom) {
             RouteMapView(
@@ -21,11 +23,10 @@ struct RouteView: View {
             if sessionManager.hasActiveSession {
                 navigationHUD
             } else {
-                Button("Старт") {
-                    sessionManager.start(route: route)
-                }
-                .buttonStyle(.borderedProminent)
-                .padding(.bottom, 40)
+                Button("Старт") { sessionManager.start(route: route) }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .padding(.bottom, 40)
             }
         }
         .navigationTitle(route.name)
@@ -34,39 +35,79 @@ struct RouteView: View {
             locationService.requestPermission()
             locationService.startUpdating()
         }
+        .alert("Завершить маршрут?", isPresented: $isShowingFinishAlert) {
+            Button("Завершить", role: .destructive) { sessionManager.finish() }
+            Button("Продолжить", role: .cancel) {}
+        } message: {
+            Text("До конца маршрута осталось \(formatDist(sessionManager.distanceRemaining)).")
+        }
     }
 
-    // MARK: - Navigation HUD
+    // MARK: - HUD
 
     private var navigationHUD: some View {
-        VStack(spacing: 12) {
-            HStack {
-                MetricCell(label: "Время",    value: formattedTime)
+        VStack(spacing: 0) {
+            metricsSection
+            Divider()
+            controlsSection
+        }
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .shadow(color: .black.opacity(0.15), radius: 10, y: 4)
+        .padding(.horizontal, 12)
+        .padding(.bottom, 24)
+    }
+
+    private var metricsSection: some View {
+        VStack(spacing: 0) {
+            // Row 1: elapsed time · instant speed · average speed
+            HStack(spacing: 0) {
+                MetricCell(label: "Время",       value: formattedTime)
                 MetricDivider()
+                MetricCell(label: "Скорость",    value: formatSpeed(sessionManager.instantSpeed))
+                MetricDivider()
+                MetricCell(label: "Ср. скорость", value: formatSpeed(sessionManager.averageSpeed))
+            }
+            Divider().padding(.horizontal)
+            // Row 2: covered · remaining
+            HStack(spacing: 0) {
                 MetricCell(label: "Пройдено", value: formatDist(sessionManager.distanceCovered))
                 MetricDivider()
                 MetricCell(label: "Осталось", value: formatDist(sessionManager.distanceRemaining))
-                MetricDivider()
-                MetricCell(label: "Скорость", value: formattedSpeed)
-            }
-
-            HStack(spacing: 16) {
-                if sessionManager.session?.state == .paused {
-                    Button("Продолжить") { sessionManager.resume() }
-                        .buttonStyle(.borderedProminent)
-                } else {
-                    Button("Пауза") { sessionManager.pause() }
-                        .buttonStyle(.bordered)
-                }
-                Button("Завершить", role: .destructive) { sessionManager.finish() }
-                    .buttonStyle(.bordered)
             }
         }
-        .padding()
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .padding(.vertical, 12)
+    }
+
+    private var controlsSection: some View {
+        HStack(spacing: 12) {
+            if sessionManager.session?.state == .paused {
+                Button("Продолжить") { sessionManager.resume() }
+                    .buttonStyle(.borderedProminent)
+                    .frame(maxWidth: .infinity)
+            } else {
+                Button("Пауза") { sessionManager.pause() }
+                    .buttonStyle(.bordered)
+                    .frame(maxWidth: .infinity)
+            }
+            Button("Завершить") { confirmFinish() }
+                .buttonStyle(.bordered)
+                .tint(.red)
+                .frame(maxWidth: .infinity)
+        }
         .padding(.horizontal)
-        .padding(.bottom, 32)
+        .padding(.vertical, 12)
+    }
+
+    // MARK: - Actions
+
+    private func confirmFinish() {
+        // Ask only if there's meaningful distance left (> 100 m)
+        if sessionManager.distanceRemaining > 100 {
+            isShowingFinishAlert = true
+        } else {
+            sessionManager.finish()
+        }
     }
 
     // MARK: - Formatting
@@ -79,8 +120,8 @@ struct RouteView: View {
             : String(format: "%02d:%02d", m, s)
     }
 
-    private var formattedSpeed: String {
-        String(format: "%.1f км/ч", sessionManager.instantSpeed * 3.6)
+    private func formatSpeed(_ ms: CLLocationSpeed) -> String {
+        String(format: "%.1f км/ч", ms * 3.6)
     }
 
     private func formatDist(_ d: CLLocationDistance) -> String {
@@ -100,18 +141,19 @@ private struct MetricCell: View {
         VStack(spacing: 2) {
             Text(value)
                 .font(.system(.callout, design: .monospaced).bold())
-                .minimumScaleFactor(0.7)
+                .minimumScaleFactor(0.6)
                 .lineLimit(1)
             Text(label)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
+        .padding(.vertical, 4)
     }
 }
 
 private struct MetricDivider: View {
-    var body: some View { Divider().frame(height: 32) }
+    var body: some View { Divider().frame(height: 36) }
 }
 
 // MARK: - RouteMapView
@@ -155,7 +197,6 @@ private struct RouteMapView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: MLNMapView, context: Context) {
-        // Switch to .follow when a session is active, back to .none otherwise.
         uiView.userTrackingMode = followUser ? .follow : .none
     }
 
@@ -163,7 +204,6 @@ private struct RouteMapView: UIViewRepresentable {
 
     final class Coordinator: NSObject, MLNMapViewDelegate {
         private let route: Route
-
         init(route: Route) { self.route = route }
 
         func mapView(_ mapView: MLNMapView, didFinishLoading style: MLNStyle) {
@@ -174,15 +214,12 @@ private struct RouteMapView: UIViewRepresentable {
         private func drawPolyline(style: MLNStyle) {
             let waypoints = route.waypoints
             guard waypoints.count >= 2 else { return }
-
             var coords = waypoints
             let polyline = coords.withUnsafeMutableBufferPointer { buf in
                 MLNPolyline(coordinates: buf.baseAddress!, count: UInt(buf.count))
             }
-
             let source = MLNShapeSource(identifier: "route-source", shape: polyline, options: nil)
             style.addSource(source)
-
             let layer = MLNLineStyleLayer(identifier: "route-layer", source: source)
             layer.lineColor = NSExpression(forConstantValue: UIColor.systemBlue)
             layer.lineWidth = NSExpression(forConstantValue: NSNumber(value: 3.0))
@@ -198,21 +235,19 @@ private struct RouteMapView: UIViewRepresentable {
                 mapView.setCenter(coords[0], zoomLevel: 14, animated: false)
                 return
             }
-
             var minLat = coords[0].latitude, maxLat = coords[0].latitude
             var minLon = coords[0].longitude, maxLon = coords[0].longitude
             for c in coords.dropFirst() {
                 minLat = min(minLat, c.latitude); maxLat = max(maxLat, c.latitude)
                 minLon = min(minLon, c.longitude); maxLon = max(maxLon, c.longitude)
             }
-
             let bounds = MLNCoordinateBounds(
                 sw: CLLocationCoordinate2D(latitude: minLat, longitude: minLon),
                 ne: CLLocationCoordinate2D(latitude: maxLat, longitude: maxLon)
             )
             mapView.setVisibleCoordinateBounds(
                 bounds,
-                edgePadding: UIEdgeInsets(top: 60, left: 40, bottom: 180, right: 40),
+                edgePadding: UIEdgeInsets(top: 60, left: 40, bottom: 200, right: 40),
                 animated: false
             )
         }
