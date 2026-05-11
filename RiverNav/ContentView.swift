@@ -8,8 +8,13 @@
 import SwiftUI
 
 struct ContentView: View {
+    @State private var sessionManager = NavigationSessionManager()
+    @State private var locationService = LocationService()
+
     var body: some View {
         RouteListView()
+            .environment(sessionManager)
+            .environment(locationService)
     }
 }
 

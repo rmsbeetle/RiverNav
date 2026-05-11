@@ -136,7 +136,7 @@ struct RouteListView: View {
             }
         }
         .navigationDestination(for: Route.self) { route in
-            RouteDetailView(route: route)
+            RouteView(route: route)
         }
     }
 }
