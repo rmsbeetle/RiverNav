@@ -55,9 +55,13 @@ struct RouteListView: View {
     @State private var viewModel = RouteListViewModel()
 
     var body: some View {
+        // @Bindable нужен для корректной двусторонней привязки TextField
+        // к @Observable свойствам — без него редактирование pre-filled
+        // поля (переименование) не пишет обратно в viewModel.
+        @Bindable var vm = viewModel
         NavigationStack {
             Group {
-                if viewModel.routes.isEmpty {
+                if vm.routes.isEmpty {
                     emptyState
                 } else {
                     routeList
@@ -67,12 +71,12 @@ struct RouteListView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Добавить", systemImage: "plus") {
-                        viewModel.isShowingDocumentPicker = true
+                        vm.isShowingDocumentPicker = true
                     }
                 }
             }
             .fileImporter(
-                isPresented: $viewModel.isShowingDocumentPicker,
+                isPresented: $vm.isShowingDocumentPicker,
                 allowedContentTypes: [
                     UTType(filenameExtension: "gpx") ?? .xml,
                     .xml
@@ -84,23 +88,21 @@ struct RouteListView: View {
                       url.startAccessingSecurityScopedResource() else { return }
                 defer { url.stopAccessingSecurityScopedResource() }
                 guard let data = try? Data(contentsOf: url) else { return }
-                // fileImporter вызывает handler после закрытия пикера —
-                // alert можно показывать сразу, без race condition
-                viewModel.pendingGPXData = data
-                viewModel.newRouteName = ""
-                viewModel.isShowingNameAlert = true
+                vm.pendingGPXData = data
+                vm.newRouteName = ""
+                vm.isShowingNameAlert = true
             }
-            .alert("Новый маршрут", isPresented: $viewModel.isShowingNameAlert) {
-                TextField("Название маршрута", text: $viewModel.newRouteName)
-                Button("Сохранить") { Task { await viewModel.savePendingRoute() } }
-                Button("Отмена", role: .cancel) { viewModel.pendingGPXData = nil }
+            .alert("Новый маршрут", isPresented: $vm.isShowingNameAlert) {
+                TextField("Название маршрута", text: $vm.newRouteName)
+                Button("Сохранить") { Task { await vm.savePendingRoute() } }
+                Button("Отмена", role: .cancel) { vm.pendingGPXData = nil }
             }
-            .alert("Переименовать", isPresented: $viewModel.isShowingRenameAlert) {
-                TextField("Название маршрута", text: $viewModel.newRouteName)
-                Button("Сохранить") { Task { await viewModel.renameRoute() } }
-                Button("Отмена", role: .cancel) { viewModel.routeToRename = nil }
+            .alert("Переименовать", isPresented: $vm.isShowingRenameAlert) {
+                TextField("Название маршрута", text: $vm.newRouteName)
+                Button("Сохранить") { Task { await vm.renameRoute() } }
+                Button("Отмена", role: .cancel) { vm.routeToRename = nil }
             }
-            .task { await viewModel.loadRoutes() }
+            .task { await vm.loadRoutes() }
         }
     }
 
