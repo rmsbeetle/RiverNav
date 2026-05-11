@@ -2,7 +2,7 @@ import Foundation
 
 struct NavigationSession {
     enum State {
-        case idle, active, paused
+        case active, paused, finished
     }
 
     let routeId: UUID

@@ -15,6 +15,10 @@ struct ContentView: View {
         RouteListView()
             .environment(sessionManager)
             .environment(locationService)
+            .onChange(of: locationService.currentLocation) { _, location in
+                guard let location else { return }
+                sessionManager.updateLocation(location)
+            }
     }
 }
 
