@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 // MARK: - ViewModel
 
@@ -70,15 +71,24 @@ struct RouteListView: View {
                     }
                 }
             }
-            .sheet(isPresented: $viewModel.isShowingDocumentPicker, onDismiss: {
-                if viewModel.pendingGPXData != nil {
-                    viewModel.newRouteName = ""
-                    viewModel.isShowingNameAlert = true
-                }
-            }) {
-                DocumentPicker(isPresented: $viewModel.isShowingDocumentPicker) { data in
-                    viewModel.pendingGPXData = data
-                }
+            .fileImporter(
+                isPresented: $viewModel.isShowingDocumentPicker,
+                allowedContentTypes: [
+                    UTType(filenameExtension: "gpx") ?? .xml,
+                    .xml
+                ],
+                allowsMultipleSelection: false
+            ) { result in
+                guard case .success(let urls) = result,
+                      let url = urls.first,
+                      url.startAccessingSecurityScopedResource() else { return }
+                defer { url.stopAccessingSecurityScopedResource() }
+                guard let data = try? Data(contentsOf: url) else { return }
+                // fileImporter вызывает handler после закрытия пикера —
+                // alert можно показывать сразу, без race condition
+                viewModel.pendingGPXData = data
+                viewModel.newRouteName = ""
+                viewModel.isShowingNameAlert = true
             }
             .alert("Новый маршрут", isPresented: $viewModel.isShowingNameAlert) {
                 TextField("Название маршрута", text: $viewModel.newRouteName)
