@@ -12,15 +12,21 @@ struct RouteView: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            RouteMapView(route: route)
-                .ignoresSafeArea()
+            RouteMapView(
+                route: route,
+                followUser: sessionManager.session?.state == .active
+            )
+            .ignoresSafeArea()
 
-            Button("Старт") {
-                sessionManager.start(route: route)
+            if sessionManager.hasActiveSession {
+                navigationHUD
+            } else {
+                Button("Старт") {
+                    sessionManager.start(route: route)
+                }
+                .buttonStyle(.borderedProminent)
+                .padding(.bottom, 40)
             }
-            .buttonStyle(.borderedProminent)
-            .disabled(sessionManager.hasActiveSession)
-            .padding(.bottom, 40)
         }
         .navigationTitle(route.name)
         .navigationBarTitleDisplayMode(.inline)
@@ -29,14 +35,91 @@ struct RouteView: View {
             locationService.startUpdating()
         }
     }
+
+    // MARK: - Navigation HUD
+
+    private var navigationHUD: some View {
+        VStack(spacing: 12) {
+            HStack {
+                MetricCell(label: "Время",    value: formattedTime)
+                MetricDivider()
+                MetricCell(label: "Пройдено", value: formatDist(sessionManager.distanceCovered))
+                MetricDivider()
+                MetricCell(label: "Осталось", value: formatDist(sessionManager.distanceRemaining))
+                MetricDivider()
+                MetricCell(label: "Скорость", value: formattedSpeed)
+            }
+
+            HStack(spacing: 16) {
+                if sessionManager.session?.state == .paused {
+                    Button("Продолжить") { sessionManager.resume() }
+                        .buttonStyle(.borderedProminent)
+                } else {
+                    Button("Пауза") { sessionManager.pause() }
+                        .buttonStyle(.bordered)
+                }
+                Button("Завершить", role: .destructive) { sessionManager.finish() }
+                    .buttonStyle(.bordered)
+            }
+        }
+        .padding()
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .padding(.horizontal)
+        .padding(.bottom, 32)
+    }
+
+    // MARK: - Formatting
+
+    private var formattedTime: String {
+        let t = Int(sessionManager.elapsedTime)
+        let h = t / 3600, m = t % 3600 / 60, s = t % 60
+        return h > 0
+            ? String(format: "%d:%02d:%02d", h, m, s)
+            : String(format: "%02d:%02d", m, s)
+    }
+
+    private var formattedSpeed: String {
+        String(format: "%.1f км/ч", sessionManager.instantSpeed * 3.6)
+    }
+
+    private func formatDist(_ d: CLLocationDistance) -> String {
+        d >= 1000
+            ? String(format: "%.1f км", d / 1000)
+            : String(format: "%.0f м", d)
+    }
+}
+
+// MARK: - Metric subviews
+
+private struct MetricCell: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(.system(.callout, design: .monospaced).bold())
+                .minimumScaleFactor(0.7)
+                .lineLimit(1)
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
+private struct MetricDivider: View {
+    var body: some View { Divider().frame(height: 32) }
 }
 
 // MARK: - RouteMapView
 
 private struct RouteMapView: UIViewRepresentable {
     let route: Route
+    let followUser: Bool
 
-    // Style JSON written once to temp dir; reused on subsequent calls.
     private static let osmStyleURL: URL = {
         let json = """
         {
@@ -71,23 +154,22 @@ private struct RouteMapView: UIViewRepresentable {
         return mapView
     }
 
-    func updateUIView(_ uiView: MLNMapView, context: Context) {}
+    func updateUIView(_ uiView: MLNMapView, context: Context) {
+        // Switch to .follow when a session is active, back to .none otherwise.
+        uiView.userTrackingMode = followUser ? .follow : .none
+    }
 
     // MARK: Coordinator
 
     final class Coordinator: NSObject, MLNMapViewDelegate {
         private let route: Route
 
-        init(route: Route) {
-            self.route = route
-        }
+        init(route: Route) { self.route = route }
 
         func mapView(_ mapView: MLNMapView, didFinishLoading style: MLNStyle) {
             drawPolyline(style: style)
             zoomToBounds(mapView)
         }
-
-        // MARK: Private
 
         private func drawPolyline(style: MLNStyle) {
             let waypoints = route.waypoints
@@ -98,25 +180,20 @@ private struct RouteMapView: UIViewRepresentable {
                 MLNPolyline(coordinates: buf.baseAddress!, count: UInt(buf.count))
             }
 
-            let source = MLNShapeSource(
-                identifier: "route-source",
-                shape: polyline,
-                options: nil
-            )
+            let source = MLNShapeSource(identifier: "route-source", shape: polyline, options: nil)
             style.addSource(source)
 
             let layer = MLNLineStyleLayer(identifier: "route-layer", source: source)
-            layer.lineColor  = NSExpression(forConstantValue: UIColor.systemBlue)
-            layer.lineWidth  = NSExpression(forConstantValue: NSNumber(value: 3.0))
-            layer.lineJoin   = NSExpression(forConstantValue: "round")
-            layer.lineCap    = NSExpression(forConstantValue: "round")
+            layer.lineColor = NSExpression(forConstantValue: UIColor.systemBlue)
+            layer.lineWidth = NSExpression(forConstantValue: NSNumber(value: 3.0))
+            layer.lineJoin  = NSExpression(forConstantValue: "round")
+            layer.lineCap   = NSExpression(forConstantValue: "round")
             style.addLayer(layer)
         }
 
         private func zoomToBounds(_ mapView: MLNMapView) {
             let coords = route.waypoints
             guard !coords.isEmpty else { return }
-
             guard coords.count > 1 else {
                 mapView.setCenter(coords[0], zoomLevel: 14, animated: false)
                 return
@@ -135,7 +212,7 @@ private struct RouteMapView: UIViewRepresentable {
             )
             mapView.setVisibleCoordinateBounds(
                 bounds,
-                edgePadding: UIEdgeInsets(top: 60, left: 40, bottom: 120, right: 40),
+                edgePadding: UIEdgeInsets(top: 60, left: 40, bottom: 180, right: 40),
                 animated: false
             )
         }
