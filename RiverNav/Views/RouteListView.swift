@@ -24,35 +24,20 @@ private final class RouteListViewModel {
         try? await RouteStore.shared.delete(id: route.id)
         await loadRoutes()
     }
-
-    func rename(_ route: Route, to name: String) async {
-        let trimmed = name.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return }
-        try? await RouteStore.shared.rename(id: route.id, newName: trimmed)
-        if let idx = routes.firstIndex(where: { $0.id == route.id }) {
-            var updated = routes
-            updated[idx].name = trimmed
-            routes = updated
-        }
-    }
 }
 
 // MARK: - View
 
 struct RouteListView: View {
     @State private var viewModel = RouteListViewModel()
-
-    // All presentation state lives in @State — reliable @State bindings, no @Bindable needed.
     @State private var isShowingDocumentPicker = false
     @State private var isShowingNameAlert = false
     @State private var isShowingRenameAlert = false
     @State private var pendingGPXData: Data?
     @State private var routeToRename: Route?
     @State private var editingName = ""
-    @State private var debugInfo = ""
 
     var body: some View {
-        ZStack(alignment: .bottom) {
         NavigationStack {
             Group {
                 if viewModel.routes.isEmpty {
@@ -103,14 +88,19 @@ struct RouteListView: View {
                 TextField("Название маршрута", text: $editingName)
                 Button("Сохранить") {
                     guard let route = routeToRename else { return }
-                    let name = editingName
-                    debugInfo = "route='\(route.name)' | editing='\(editingName)' | captured='\(name)'"
+                    let name = editingName.trimmingCharacters(in: .whitespaces)
+                    guard !name.isEmpty else { return }
+                    // Synchronous in-memory update — batched with @State mutations,
+                    // guaranteed to trigger a SwiftUI re-render before disk I/O.
+                    if let idx = viewModel.routes.firstIndex(where: { $0.id == route.id }) {
+                        var updated = viewModel.routes
+                        updated[idx].name = name
+                        viewModel.routes = updated
+                    }
                     routeToRename = nil
                     editingName = ""
-                    Task {
-                        await viewModel.rename(route, to: name)
-                        debugInfo += " | routes=\(viewModel.routes.map(\.name))"
-                    }
+                    let routeId = route.id
+                    Task { try? await RouteStore.shared.rename(id: routeId, newName: name) }
                 }
                 Button("Отмена", role: .cancel) {
                     routeToRename = nil
@@ -118,17 +108,6 @@ struct RouteListView: View {
             }
             .task { await viewModel.loadRoutes() }
         }
-        if !debugInfo.isEmpty {
-            Text(debugInfo)
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(.white)
-                .padding(8)
-                .background(.black.opacity(0.85))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-                .padding()
-                .onTapGesture { debugInfo = "" }
-        }
-        } // ZStack
     }
 
     // MARK: - Subviews
