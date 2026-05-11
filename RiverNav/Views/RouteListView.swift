@@ -6,25 +6,17 @@ import UniformTypeIdentifiers
 @Observable
 private final class RouteListViewModel {
     var routes: [Route] = []
-    var isShowingDocumentPicker = false
-    var isShowingNameAlert = false
-    var isShowingRenameAlert = false
-    var newRouteName = ""
-    var pendingGPXData: Data?
-    var routeToRename: Route?
 
     func loadRoutes() async {
         routes = (try? await RouteStore.shared.loadAll()) ?? []
     }
 
-    func savePendingRoute() async {
-        let trimmed = newRouteName.trimmingCharacters(in: .whitespaces)
-        guard let data = pendingGPXData, !trimmed.isEmpty else { return }
+    func savePendingRoute(name: String, data: Data) async {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
         let waypoints = GPXParser().parse(data: data)
         let route = Route(name: trimmed, waypoints: waypoints)
         try? await RouteStore.shared.save(route)
-        pendingGPXData = nil
-        newRouteName = ""
         await loadRoutes()
     }
 
@@ -33,23 +25,15 @@ private final class RouteListViewModel {
         await loadRoutes()
     }
 
-    func startRename(_ route: Route) {
-        routeToRename = route
-        newRouteName = route.name
-        isShowingRenameAlert = true
-    }
-
-    func renameRoute() async {
-        let trimmed = newRouteName.trimmingCharacters(in: .whitespaces)
-        guard let route = routeToRename, !trimmed.isEmpty else { return }
+    func rename(_ route: Route, to name: String) async {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
         try? await RouteStore.shared.rename(id: route.id, newName: trimmed)
         if let idx = routes.firstIndex(where: { $0.id == route.id }) {
             var updated = routes
             updated[idx].name = trimmed
             routes = updated
         }
-        routeToRename = nil
-        newRouteName = ""
     }
 }
 
@@ -58,14 +42,18 @@ private final class RouteListViewModel {
 struct RouteListView: View {
     @State private var viewModel = RouteListViewModel()
 
+    // All presentation state lives in @State — reliable @State bindings, no @Bindable needed.
+    @State private var isShowingDocumentPicker = false
+    @State private var isShowingNameAlert = false
+    @State private var isShowingRenameAlert = false
+    @State private var pendingGPXData: Data?
+    @State private var routeToRename: Route?
+    @State private var editingName = ""
+
     var body: some View {
-        // @Bindable нужен для корректной двусторонней привязки TextField
-        // к @Observable свойствам — без него редактирование pre-filled
-        // поля (переименование) не пишет обратно в viewModel.
-        @Bindable var vm = viewModel
         NavigationStack {
             Group {
-                if vm.routes.isEmpty {
+                if viewModel.routes.isEmpty {
                     emptyState
                 } else {
                     routeList
@@ -75,12 +63,12 @@ struct RouteListView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Добавить", systemImage: "plus") {
-                        vm.isShowingDocumentPicker = true
+                        isShowingDocumentPicker = true
                     }
                 }
             }
             .fileImporter(
-                isPresented: $vm.isShowingDocumentPicker,
+                isPresented: $isShowingDocumentPicker,
                 allowedContentTypes: [
                     UTType(filenameExtension: "gpx") ?? .xml,
                     .xml
@@ -92,21 +80,37 @@ struct RouteListView: View {
                       url.startAccessingSecurityScopedResource() else { return }
                 defer { url.stopAccessingSecurityScopedResource() }
                 guard let data = try? Data(contentsOf: url) else { return }
-                vm.pendingGPXData = data
-                vm.newRouteName = ""
-                vm.isShowingNameAlert = true
+                pendingGPXData = data
+                editingName = ""
+                isShowingNameAlert = true
             }
-            .alert("Новый маршрут", isPresented: $vm.isShowingNameAlert) {
-                TextField("Название маршрута", text: $vm.newRouteName)
-                Button("Сохранить") { Task { await vm.savePendingRoute() } }
-                Button("Отмена", role: .cancel) { vm.pendingGPXData = nil }
+            .alert("Новый маршрут", isPresented: $isShowingNameAlert) {
+                TextField("Название маршрута", text: $editingName)
+                Button("Сохранить") {
+                    guard let data = pendingGPXData else { return }
+                    let name = editingName
+                    pendingGPXData = nil
+                    editingName = ""
+                    Task { await viewModel.savePendingRoute(name: name, data: data) }
+                }
+                Button("Отмена", role: .cancel) {
+                    pendingGPXData = nil
+                }
             }
-            .alert("Переименовать", isPresented: $vm.isShowingRenameAlert) {
-                TextField("Название маршрута", text: $vm.newRouteName)
-                Button("Сохранить") { Task { await vm.renameRoute() } }
-                Button("Отмена", role: .cancel) { vm.routeToRename = nil }
+            .alert("Переименовать", isPresented: $isShowingRenameAlert) {
+                TextField("Название маршрута", text: $editingName)
+                Button("Сохранить") {
+                    guard let route = routeToRename else { return }
+                    let name = editingName
+                    routeToRename = nil
+                    editingName = ""
+                    Task { await viewModel.rename(route, to: name) }
+                }
+                Button("Отмена", role: .cancel) {
+                    routeToRename = nil
+                }
             }
-            .task { await vm.loadRoutes() }
+            .task { await viewModel.loadRoutes() }
         }
     }
 
@@ -138,7 +142,9 @@ struct RouteListView: View {
                 }
                 .contextMenu {
                     Button("Переименовать", systemImage: "pencil") {
-                        viewModel.startRename(route)
+                        routeToRename = route
+                        editingName = route.name
+                        isShowingRenameAlert = true
                     }
                     Button("Удалить", systemImage: "trash", role: .destructive) {
                         Task { await viewModel.delete(route) }
