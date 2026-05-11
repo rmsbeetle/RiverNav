@@ -43,9 +43,13 @@ private final class RouteListViewModel {
         let trimmed = newRouteName.trimmingCharacters(in: .whitespaces)
         guard let route = routeToRename, !trimmed.isEmpty else { return }
         try? await RouteStore.shared.rename(id: route.id, newName: trimmed)
+        if let idx = routes.firstIndex(where: { $0.id == route.id }) {
+            var updated = routes
+            updated[idx].name = trimmed
+            routes = updated
+        }
         routeToRename = nil
         newRouteName = ""
-        await loadRoutes()
     }
 }
 
