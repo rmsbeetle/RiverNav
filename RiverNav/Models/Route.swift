@@ -1,7 +1,7 @@
 import CoreLocation
 import Foundation
 
-struct Route: Identifiable {
+struct Route: Identifiable, Hashable {
     let id: UUID
     var name: String
     var waypoints: [CLLocationCoordinate2D]
@@ -13,4 +13,7 @@ struct Route: Identifiable {
         self.waypoints = waypoints
         self.createdAt = createdAt
     }
+
+    static func == (lhs: Route, rhs: Route) -> Bool { lhs.id == rhs.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
