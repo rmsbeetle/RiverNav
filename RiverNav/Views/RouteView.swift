@@ -11,6 +11,8 @@ struct RouteView: View {
     @Environment(LocationService.self) private var locationService
 
     @State private var isShowingFinishAlert = false
+    @State private var isShowingFarAlert = false
+    @State private var distanceToRoute: CLLocationDistance = 0
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -23,7 +25,7 @@ struct RouteView: View {
             if sessionManager.hasActiveSession {
                 navigationHUD
             } else {
-                Button("Старт") { sessionManager.start(route: route) }
+                Button("Старт") { attemptStart() }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
                     .padding(.bottom, 40)
@@ -40,6 +42,12 @@ struct RouteView: View {
             Button("Продолжить", role: .cancel) {}
         } message: {
             Text("До конца маршрута осталось \(formatDist(sessionManager.distanceRemaining)).")
+        }
+        .alert("Далеко от маршрута", isPresented: $isShowingFarAlert) {
+            Button("Начать всё равно") { sessionManager.start(route: route) }
+            Button("Отмена", role: .cancel) {}
+        } message: {
+            Text("Вы находитесь в \(formatDist(distanceToRoute)) от ближайшей точки маршрута.")
         }
     }
 
@@ -100,6 +108,18 @@ struct RouteView: View {
     }
 
     // MARK: - Actions
+
+    private func attemptStart() {
+        if let location = locationService.currentLocation {
+            let dist = sessionManager.minimumDistance(to: route, from: location)
+            if dist > 200 {
+                distanceToRoute = dist
+                isShowingFarAlert = true
+                return
+            }
+        }
+        sessionManager.start(route: route)
+    }
 
     private func confirmFinish() {
         // Ask only if there's meaningful distance left (> 100 m)

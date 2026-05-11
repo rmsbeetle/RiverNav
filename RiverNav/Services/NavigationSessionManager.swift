@@ -124,7 +124,11 @@ final class NavigationSessionManager {
         totalRouteLength = acc
     }
 
+    // If the GPS position is farther than this from the route, progress is not updated.
+    private static let offRouteThreshold: CLLocationDistance = 300
+
     /// Projects `pos` onto the polyline, updates distanceCovered / distanceRemaining.
+    /// No-ops when the nearest point on the route is > offRouteThreshold metres away.
     private func projectOntoRoute(_ pos: CLLocationCoordinate2D) {
         guard waypoints.count >= 2 else { return }
 
@@ -133,18 +137,13 @@ final class NavigationSessionManager {
         var bestDistSq = Double.infinity
 
         for i in 0..<waypoints.count - 1 {
-            // Work in local flat-Earth metres relative to waypoints[i]
             let (ax, ay) = toMeters(origin: waypoints[i], target: waypoints[i + 1])
             let (px, py) = toMeters(origin: waypoints[i], target: pos)
-
             let lenSq = ax * ax + ay * ay
             let t = lenSq == 0 ? 0.0 : max(0, min(1, (px * ax + py * ay) / lenSq))
-
-            // Squared distance from pos to the projected point on segment
             let ex = px - t * ax
             let ey = py - t * ay
             let dSq = ex * ex + ey * ey
-
             if dSq < bestDistSq {
                 bestDistSq = dSq
                 bestIdx = i
@@ -152,10 +151,46 @@ final class NavigationSessionManager {
             }
         }
 
+        // Accurate geodesic check: interpolate the projected coordinate and measure real distance.
+        // (flat-Earth toMeters() can be unreliable for points hundreds of km away)
+        let p1 = waypoints[bestIdx], p2 = waypoints[bestIdx + 1]
+        let projCoord = CLLocationCoordinate2D(
+            latitude:  p1.latitude  + bestT * (p2.latitude  - p1.latitude),
+            longitude: p1.longitude + bestT * (p2.longitude - p1.longitude)
+        )
+        let realDist = CLLocation(latitude: pos.latitude, longitude: pos.longitude)
+            .distance(from: CLLocation(latitude: projCoord.latitude, longitude: projCoord.longitude))
+        guard realDist <= Self.offRouteThreshold else { return }
+
         let segLen = haversine(waypoints[bestIdx], waypoints[bestIdx + 1])
         let covered = cumulativeLengths[bestIdx] + bestT * segLen
         distanceCovered = covered
         distanceRemaining = max(0, totalRouteLength - covered)
+    }
+
+    /// Returns the minimum geodesic distance from `location` to any point on `route`'s polyline.
+    /// Used by RouteView to warn the user before starting if they are far from the route.
+    func minimumDistance(to route: Route, from location: CLLocation) -> CLLocationDistance {
+        let wps = route.waypoints
+        guard wps.count >= 2 else {
+            return wps.isEmpty ? .infinity :
+                location.distance(from: CLLocation(latitude: wps[0].latitude, longitude: wps[0].longitude))
+        }
+        var minDist = CLLocationDistance.infinity
+        let pos = location.coordinate
+        for i in 0..<wps.count - 1 {
+            let (ax, ay) = toMeters(origin: wps[i], target: wps[i + 1])
+            let (px, py) = toMeters(origin: wps[i], target: pos)
+            let lenSq = ax * ax + ay * ay
+            let t = lenSq == 0 ? 0.0 : max(0, min(1, (px * ax + py * ay) / lenSq))
+            let projCoord = CLLocationCoordinate2D(
+                latitude:  wps[i].latitude  + t * (wps[i + 1].latitude  - wps[i].latitude),
+                longitude: wps[i].longitude + t * (wps[i + 1].longitude - wps[i].longitude)
+            )
+            let dist = location.distance(from: CLLocation(latitude: projCoord.latitude, longitude: projCoord.longitude))
+            minDist = min(minDist, dist)
+        }
+        return minDist
     }
 
     /// Equirectangular approximation: returns (dx, dy) in metres from `origin` to `target`.
